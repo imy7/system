@@ -1,8 +1,11 @@
 name: Update Proxy IP (Only IP)
 
+# 👇 添加权限声明
+permissions:
+  contents: write
+
 on:
   schedule:
-    # 每天北京时间 03:00 (UTC 19:00)
     - cron: '0 19 * * *'
   workflow_dispatch:
 
@@ -15,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
+          persist-credentials: true   # 允许 git push
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,24 +51,23 @@ jobs:
               with open("cmliu/proxyip.txt", "w", encoding="utf-8") as f:
                   f.write("\n".join(ips) + "\n")
 
-              print(f"Successfully saved {len(ips)} IPs to cmliu/proxyip.txt")
+              print(f"Successfully saved {len(ips)} IPs")
 
           except Exception as e:
               print(f"Error: {e}")
               os.makedirs("cmliu", exist_ok=True)
               with open("cmliu/proxyip.txt", "w", encoding="utf-8") as f:
                   f.write("")
-
           EOF
 
-      - name: Commit and push if file changed
+      - name: Commit and push
         run: |
           git config user.name "Auto Updater"
           git config user.email "action@github.com"
           git add cmliu/proxyip.txt
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes."
           else
             git commit -m "chore: update proxyip.txt $(date '+%Y-%m-%d %H:%M:%S')"
             git push origin HEAD:main
