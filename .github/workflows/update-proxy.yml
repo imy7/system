@@ -33,7 +33,7 @@ jobs:
         mkdir -p cmliu
         
         # 移动文件到正确位置
-        mv /cmliu/proxyip.txt ./cmliu/proxyip.txt 2>/dev/ || true
+        mv cmliu/proxyip.txt cmliu/proxyip.txt 2>/dev/ || true
         
         git add ./cmliu/proxyip.txt
         
