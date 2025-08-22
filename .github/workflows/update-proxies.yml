@@ -1,111 +1,72 @@
-name: 更新代理IP数据
+name: Update Proxy IP (Only IP)
 
 on:
-  workflow_dispatch:  # 允许手动触发
   schedule:
-    - cron: '0 0 * * *'  # 每天 UTC 时间 00:00（北京时间 08:00）
+    # 每天北京时间 03:00 执行 (UTC 时间 19:00)
+    - cron: '0 19 * * *'
+  workflow_dispatch:  # 支持手动触发
 
 jobs:
-  update-data:
+  update-proxy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 检出仓库
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
-      - name: 设置 Python 环境
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.11'
 
-      - name: 安装依赖
+      - name: Fetch IP list and update proxyip.txt
         run: |
-          python -m pip install requests
-
-      - name: 运行数据获取脚本
-        run: |
-          python << 'EOF'
+          python << EOF
           import requests
           import os
 
-          # 确保 cmliu 目录存在
-          os.makedirs("cmliu", exist_ok=True)
-
-          # ============ 获取并写入 cmliu/proxy.txt ============
-          proxy_url = "https://ipdb.api.030101.xyz/?type=bestproxy&country=true"
-          proxy_file = "cmliu/proxy.txt"
+          API_URL = "https://ipdb.api.030101.xyz/?type=bestproxy"
 
           try:
-              resp = requests.get(proxy_url, timeout=10)
-              resp.raise_for_status()
-              data = resp.json()
-              with open(proxy_file, "w", encoding="utf-8") as f:
-                  for item in data:
-                      ip = item.get("ip")
-                      country = item.get("country", "unknown").upper()[:2]  # 国家代码前两位
-                      if ip:
-                          f.write(f"{ip}#{country}\n")
-              print(f"✅ {proxy_file} 更新完成")
+              print("Fetching IP list from API...")
+              response = requests.get(API_URL, timeout=10)
+              response.raise_for_status()
+
+              # 返回的是纯文本，每行一个 IP
+              raw_data = response.text.strip()
+              ips = [line.strip() for line in raw_data.splitlines() if line.strip()]
+
+              # 确保目录存在
+              os.makedirs("cmliu", exist_ok=True)
+
+              # 覆盖写入只包含 IP 的文件
+              with open("cmliu/proxyip.txt", "w", encoding="utf-8") as f:
+                  f.write("\n".join(ips) + "\n")
+
+              print(f"Successfully saved {len(ips)} IPs to cmliu/proxyip.txt")
+
           except Exception as e:
-              print(f"❌ 获取 {proxy_url} 失败: {e}")
-              open(proxy_file, "w").close()  # 清空或创建空文件
-
-
-          # ============ 获取并写入 cmliu/ipv4.txt ============
-          ipv4_urls = [
-              "https://addressesapi.090227.xyz/ip.164746.xyz",
-              "https://addressesapi.090227.xyz/CloudFlareYes",
-              "https://ipdb.api.030101.xyz/?type=bestcf&country=true"
-          ]
-          ipv4_file = "cmliu/ipv4.txt"
-
-          lines = set()  # 使用 set 去重
-
-          for url in ipv4_urls:
-              try:
-                  headers = {"User-Agent": "curl/7.68.0"}
-                  resp = requests.get(url, timeout=10, headers=headers)
-                  resp.raise_for_status()
-
-                  if "ipdb.api" in url:
-                      # JSON 格式：包含 country
-                      data = resp.json()
-                      for item in data:
-                          ip = item.get("ip")
-                          country = item.get("country", "unknown").upper()[:2]
-                          if ip:
-                              lines.add(f"{ip}#{country}")
-                  else:
-                      # 纯文本 IP 列表（如 ip.164746.xyz 和 CloudFlareYes）
-                      for line in resp.text.strip().splitlines():
-                          ip = line.strip()
-                          if ip and "." in ip:  # 确保是 IPv4
-                              lines.add(f"{ip}#US")  # 默认国家码 US（可自定义）
-              except Exception as e:
-                  print(f"⚠️ 获取 {url} 失败: {e}")
-
-          # 写入文件（覆盖原内容）
-          with open(ipv4_file, "w", encoding="utf-8") as f:
-              for line in sorted(lines):
-                  f.write(line + "\n")
-          print(f"✅ {ipv4_file} 更新完成")
+              print(f"Error fetching or processing data: {e}")
+              # 出错时写入空文件（确保覆盖）
+              os.makedirs("cmliu", exist_ok=True)
+              with open("cmliu/proxyip.txt", "w", encoding="utf-8") as f:
+                  f.write("")
 
           EOF
 
-      - name: 提交更改
+      - name: Commit and push if file changed
         run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Actions"
+          git config user.name "Auto Updater"
+          git config user.email "action@github.com"
+          git add cmliu/proxyip.txt
 
-          # 添加 cmliu 目录下的文件
-          git add cmliu/proxy.txt cmliu/ipv4.txt
-
-          # 判断是否有更改
+          # 仅当有变化时提交
           if git diff --cached --quiet; then
-            echo "✅ 没有更改，无需提交"
+            echo "No changes to commit."
           else
-            git commit -m "🔄 自动更新 IP 数据 $(date '+%Y-%m-%d %H:%M:%S')"
-            git push
-            echo "🎉 数据已提交并推送到仓库"
+            git commit -m "chore: update proxyip.txt with IPs only $(date '+%Y-%m-%d %H:%M:%S')"
+            git push origin HEAD:main  # 请根据你的默认分支修改（main 或 master）
           fi
