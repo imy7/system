@@ -1,10 +1,8 @@
-name: Update Proxy IP List
+name: Update IP List
 
 on:
   schedule:
-    # 每日凌晨 2 点运行（UTC 时间）
-    - cron: '0 0 * * *'
-  # 允许手动触发
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,74 +10,55 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    # 检出仓库
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        # 必须设置为 true 以保留文件历史
-        persist-credentials: true
+        # 使用 Personal Access Token
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-    # 提取并处理数据
     - name: Extract and process IPv4 addresses
       id: extract
       run: |
-        # 创建 cmliu 目录（如果不存在）
         mkdir -p cmliu
-        
-        # 清空现有文件或创建新文件
         > cmliu/ip.txt
         
-        # 定义 API 端点数组
         declare -a API_ENDPOINTS=(
           "https://ipdb.api.030101.xyz/?type=bestcf"
           "https://addressesapi.090227.xyz/CloudFlareYes"
           "https://addressesapi.090227.xyz/ip.164746.xyz"
         )
         
-        # 处理每个 API 端点
         for endpoint in "${API_ENDPOINTS[@]}"; do
           echo "Fetching data from $endpoint"
           
-          # 获取数据并提取 IPv4 地址，过滤掉 IPv6 和其他格式
           curl -s "$endpoint" | \
-            # 使用正则表达式匹配 IPv4 地址格式 (xxx.xxx.xxx.xxx)
             grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | \
-            # 验证每个字节是否在 0-255 范围内
             awk -F'.' '
               function valid(v) { return v >= 0 && v <= 255 }
               valid($1) && valid($2) && valid($3) && valid($4) { print $1"."$2"."$3"."$4 }
             ' >> cmliu/ip.txt
         done
         
-        # 去除重复的 IP 地址并排序
         sort -u cmliu/ip.txt -o cmliu/ip.txt
-        
-        # 统计最终 IP 数量
         IP_COUNT=$(wc -l < cmliu/ip.txt)
-        echo "Found $IP_COUNT unique IPv4 addresses"
         echo "ip_count=$IP_COUNT" >> $GITHUB_OUTPUT
 
-    # 提交更改
     - name: Commit and push changes
       run: |
-        # 检查是否有更改
         if git diff --quiet && git diff --staged --quiet; then
           echo "No changes to commit"
           exit 0
         fi
         
-        # 设置 Git 信息
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
-        # 添加、提交并推送更改
         git add cmliu/ip.txt
         git commit -m "Update IP list: $(date '+%Y-%m-%d %H:%M:%S UTC')"
         
-        # 推送到当前分支
-        git push origin HEAD:main || git push origin HEAD:master
+        # 使用 PAT 推送
+        git push https://x-access-token:${{ secrets.REPO_PAT }}@github.com/${{ github.repository }}.git HEAD:${{ github.ref_name }}
 
-    # 输出结果
     - name: Show results
       run: |
         echo "Updated IP list with ${{ steps.extract.outputs.ip_count }} unique IPv4 addresses"
