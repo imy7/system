@@ -1,1 +1,1 @@
-https://ipdb.api.030101.xyz/?type=bestproxy&country=true
+//https://ipdb.api.030101.xyz/?type=bestproxy&country=true
