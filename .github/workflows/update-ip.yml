@@ -3,7 +3,7 @@ name: Update Proxy IP List
 on:
   schedule:
     # 每日凌晨 2 点运行（UTC 时间）
-    - cron: '0 2 * * *'
+    - cron: '0 0 * * *'
   # 允许手动触发
   workflow_dispatch:
 
