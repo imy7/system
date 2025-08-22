@@ -1,0 +1,46 @@
+name: 更新IPv4数据（格式：IP#国家代码）
+
+on:
+  schedule:
+    - cron: "0 */24 * * *"  # 每6小时运行一次
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  update-ipv4:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 检查仓库
+      uses: actions/checkout@v3
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: 安装依赖
+      run: pip install requests
+
+    - name: 获取并合并IPv4数据
+      run: python fetch_and_merge_ipv4.py
+
+    - name: 提交更改
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # 确保目录存在
+        mkdir -p cmliu
+        
+        # 移动文件到正确位置
+        mv cmliu/ipv4.txt ./cmliu/ipv4.txt 2>/dev/ || true
+        
+        git add ./cmliu/ipv4.txt
+        
+        # 只有当有更改时才提交
+        if git diff --quiet --cached; then
+          echo "📌 没有检测到更改，不提交"
+        else
+          git commit -m "auto: 更新IPv4数据（格式：IP#国家代码） $(date +'%Y-%m-%d %H:%M')"
+          git push
+        fi
