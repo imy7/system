@@ -1,4 +1,4 @@
-name: Update Proxy Lists
+name: Update Proxy Lists (IP Only)
 
 on:
   schedule:
@@ -25,91 +25,71 @@ jobs:
           python << EOF
           import requests
           import os
-          
+          import re
+
           # 确保目标目录存在
-          os.makedirs(os.path.dirname("cmliu/proxy.txt"), exist_ok=True)
-          os.makedirs(os.path.dirname("cmliu/ipv4.txt"), exist_ok=True)
-          
-          # 函数：获取API数据并格式化
-          def fetch_and_format(url, format_func=None):
+          os.makedirs("cmliu", exist_ok=True)
+
+          # 函数：从文本中提取所有IP地址
+          def extract_ips(text):
+              # 匹配IPv4地址的正则表达式
+              ip_pattern = re.compile(r'\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.'
+                                    r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.'
+                                    r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.'
+                                    r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b')
+              return list(set(ip_pattern.findall(text)))  # 去重
+
+          # 函数：获取API数据并提取IP
+          def fetch_ips(url):
               try:
                   response = requests.get(url, timeout=10)
                   response.raise_for_status()
-                  data = response.json()
                   
-                  if format_func:
-                      return format_func(data)
-                  return data
+                  # 尝试解析JSON（如果响应是JSON）
+                  try:
+                      data = response.json()
+                      # 根据不同API结构提取IP
+                      if isinstance(data, dict):
+                          if 'data' in data:  # bestproxy/bestcf格式
+                              ips = [item.get('ip') for item in data['data'] if 'ip' in item]
+                          elif 'ip' in data:  # 直接包含ip字段
+                              ips = [data['ip']] if isinstance(data['ip'], str) else data['ip']
+                          else:  # 其他字典结构，尝试提取所有字符串值
+                              ips = [val for val in data.values() if isinstance(val, str)]
+                      elif isinstance(data, list):  # 直接是IP列表
+                          ips = [item for item in data if isinstance(item, str)]
+                      else:
+                          ips = []
+                      
+                      # 过滤掉非IP字符串（如果解析JSON后仍有复杂结构）
+                      return [ip for ip in ips if re.match(r'^\d+\.\d+\.\d+\.\d+$', str(ip))]
+                  
+                  except ValueError:  # 如果不是JSON，直接从文本提取IP
+                      return extract_ips(response.text)
+                  
               except Exception as e:
                   print(f"Error fetching {url}: {e}")
-                  return None
+                  return []
+
+          # === 处理 proxy.txt ===
+          proxy_ips = fetch_ips("https://ipdb.api.030101.xyz/?type=bestproxy&country=true")
+          with open("cmliu/proxy.txt", "w") as f:
+              f.write("\n".join(proxy_ips) + "\n")  # 每个IP一行
+
+          # === 处理 ipv4.txt ===
+          ipv4_ips = []
+          # API 1
+          ipv4_ips.extend(fetch_ips("https://addressesapi.090227.xyz/ip.164746.xyz"))
+          # API 2
+          ipv4_ips.extend(fetch_ips("https://addressesapi.090227.xyz/CloudFlareYes"))
+          # API 3
+          ipv4_ips.extend(fetch_ips("https://ipdb.api.030101.xyz/?type=bestcf&country=true"))
           
-          # 格式化函数1：bestproxy格式
-          def format_bestproxy(data):
-              result = []
-              for item in data.get('data', []):
-                  ip = item.get('ip')
-                  country = item.get('country', 'UNKNOWN')
-                  if ip:
-                      result.append(f"{ip}#{country}")
-              return '\n'.join(result)
-          
-          # 格式化函数2：简单IP列表格式
-          def format_ip_list(data):
-              if isinstance(data, list):
-                  return '\n'.join(data)
-              elif isinstance(data, dict):
-                  # 处理可能的不同API响应结构
-                  ips = []
-                  for value in data.values():
-                      if isinstance(value, list):
-                          ips.extend(value)
-                      elif isinstance(value, str):
-                          ips.append(value)
-                  return '\n'.join(ips)
-              return str(data)
-          
-          # 获取并写入proxy.txt数据
-          proxy_data = fetch_and_format(
-              "https://ipdb.api.030101.xyz/?type=bestproxy&country=true",
-              format_bestproxy
-          )
-          if proxy_data:
-              with open("cmliu/proxy.txt", "w") as f:
-                  f.write(proxy_data + "\n")  # 确保以换行符结束
-          
-          # 获取并写入ipv4.txt数据
-          ipv4_data_parts = []
-          
-          # 第一个API
-          data1 = fetch_and_format(
-              "https://addressesapi.090227.xyz/ip.164746.xyz",
-              format_ip_list
-          )
-          if data1:
-              ipv4_data_parts.append(data1)
-          
-          # 第二个API
-          data2 = fetch_and_format(
-              "https://addressesapi.090227.xyz/CloudFlareYes",
-              format_ip_list
-          )
-          if data2:
-              ipv4_data_parts.append(data2)
-          
-          # 第三个API
-          data3 = fetch_and_format(
-              "https://ipdb.api.030101.xyz/?type=bestcf&country=true",
-              format_bestproxy  # 使用相同的格式化函数，假设结构相同
-          )
-          if data3:
-              ipv4_data_parts.append(data3)
-          
-          # 合并所有数据并写入文件
-          if ipv4_data_parts:
-              with open("cmliu/ipv4.txt", "w") as f:
-                  f.write('\n'.join(ipv4_data_parts) + "\n")  # 确保以换行符结束
-          
+          # 去重并写入文件
+          ipv4_ips = list(set(ipv4_ips))  # 去重
+          with open("cmliu/ipv4.txt", "w") as f:
+              f.write("\n".join(ipv4_ips) + "\n")
+
           EOF
           
       - name: Check for changes
@@ -123,5 +103,5 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add cmliu/proxy.txt cmliu/ipv4.txt
-          git commit -m "chore: update proxy lists $(date +'%Y-%m-%d')"
+          git commit -m "chore: update proxy IP lists $(date +'%Y-%m-%d')"
           git push
