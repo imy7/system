@@ -2,8 +2,8 @@ name: Update Proxy and IP Data
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天UTC时间0点运行（北京时间8点）
-  workflow_dispatch:    # 允许手动触发
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   update-data:
@@ -19,17 +19,54 @@ jobs:
 
       - name: Fetch proxy data and write to files
         run: |
-          # 获取 bestproxy 数据并仅提取 IP，写入 cmliu/proxy.txt
+          # 调试函数：打印 API 响应和错误
+          debug_api() {
+            local url="$1"
+            echo "DEBUG: Fetching URL: $url"
+            response=$(curl -s "$url")
+            echo "DEBUG: Raw response:"
+            echo "$response" | head -n 10  # 打印前10行避免日志过长
+            echo "DEBUG: JSON validity check:"
+            echo "$response" | jq empty 2>&1 || echo "Invalid JSON!"
+          }
+
+          # 提取 IP 的函数（兼容不同 JSON 结构）
+          extract_ips() {
+            local url="$1"
+            debug_api "$url"
+            curl -s "$url" | jq -r '
+              try (
+                # 情况1: 直接是 IP 数组 ["1.1.1.1", "2.2.2.2"]
+                if type == "array" then .[]
+                # 情况2: 对象数组 [{ "ip": "1.1.1.1" }, ...]
+                elif type == "object" and has("ip") then .ip
+                # 情况3: 嵌套结构 { "data": [{ "ip": "..." }] }
+                elif has("data") then .data[].ip
+                else empty
+              end
+              ) catch (
+                # 如果解析失败，尝试用 grep 提取 IP（兼容非 JSON 响应）
+                scan("[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+") | .[]
+              )'
+          }
+
+          # 获取 bestproxy 数据
           echo "Fetching bestproxy data..."
-          curl -s "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" | jq -r '.[] | .ip' > cmliu/proxy.txt
-          
-          # 获取其他 IP 数据并仅提取 IP，写入 cmliu/ipv4.txt
+          extract_ips "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" > cmliu/proxy.txt
+
+          # 获取其他 IP 数据
           echo "Fetching other IP data..."
           {
-            curl -s "https://addressesapi.090227.xyz/ip.164746.xyz" | jq -r '.[] | .ip'
-            curl -s "https://addressesapi.090227.xyz/CloudFlareYes" | jq -r '.[] | .ip'
-            curl -s "https://ipdb.api.030101.xyz/?type=bestcf&country=true" | jq -r '.[] | .ip'
+            extract_ips "https://addressesapi.090227.xyz/ip.164746.xyz"
+            extract_ips "https://addressesapi.090227.xyz/CloudFlareYes"
+            extract_ips "https://ipdb.api.030101.xyz/?type=bestcf&country=true"
           } > cmliu/ipv4.txt
+
+          # 检查文件是否为空
+          if [ ! -s cmliu/proxy.txt ]; then
+            echo "ERROR: proxy.txt is empty! API may have changed."
+            exit 1
+          fi
 
       - name: Commit and push changes
         run: |
