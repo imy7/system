@@ -1,102 +1,40 @@
-name: Update Proxy Lists (IP Only)
+name: Update Proxy and IP Data
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天UTC时间0点运行
+    - cron: '0 0 * * *'  # 每天UTC时间0点运行（北京时间8点）
   workflow_dispatch:    # 允许手动触发
 
 jobs:
-  update-proxies:
+  update-data:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/checkout@v3
         with:
-          python-version: '3.9'
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
-        run: pip install requests
+      - name: Create cmliu directory if not exists
+        run: mkdir -p cmliu
 
-      - name: Fetch and update proxy data
+      - name: Fetch proxy data and write to files
         run: |
-          python << EOF
-          import os
-          import requests
-          import re
-
-          os.makedirs("cmliu", exist_ok=True)
-
-          def fetch_ips(url):
-              try:
-                  response = requests.get(url, timeout=10)
-                  response.raise_for_status()
-
-                  ip_pattern = re.compile(r'\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.'
-                                        r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.'
-                                        r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.'
-                                        r'(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b')
-
-                  try:
-                      data = response.json()
-                      ips = []
-                      if isinstance(data, dict):
-                          if 'data' in data:
-                              for item in data['data']:
-                                  if 'ip' in item:
-                                      ips.append(item['ip'])
-                          elif 'ip' in data:
-                              ips.append(data['ip'])
-                          else:
-                              for value in data.values():
-                                  if isinstance(value, str):
-                                      ips.extend(ip_pattern.findall(value))
-                      elif isinstance(data, list):
-                          ips = [str(item) for item in data if ip_pattern.match(str(item))]
-                      return list(set(ips))
-                  except ValueError:
-                      return ip_pattern.findall(response.text)
-
-              except Exception as e:
-                  print(f"Error fetching {url}: {e}")
-                  return []
-
-          # 更新 proxy.txt
-          proxy_ips = fetch_ips("https://ipdb.api.030101.xyz/?type=bestproxy&country=true")
-          with open("cmliu/proxy.txt", "w") as f:
-              f.write("\n".join(proxy_ips))
-          print(f"Written {len(proxy_ips)} IPs to cmliu/proxy.txt")
-
-          # 更新 ipv4.txt
-          ipv4_ips = []
-          ipv4_ips.extend(fetch_ips("https://addressesapi.090227.xyz/ip.164746.xyz"))
-          ipv4_ips.extend(fetch_ips("https://addressesapi.090227.xyz/CloudFlareYes"))
-          ipv4_ips.extend(fetch_ips("https://ipdb.api.030101.xyz/?type=bestcf&country=true"))
-          ipv4_ips = list(set(ipv4_ips))
-          with open("cmliu/ipv4.txt", "w") as f:
-              f.write("\n".join(ipv4_ips))
-          print(f"Written {len(ipv4_ips)} IPs to cmliu/ipv4.txt")
-
-          EOF
-
-      - name: Check for changes
-        id: check_changes
-        run: |
-          git add cmliu/proxy.txt cmliu/ipv4.txt
-          if git diff --cached --quiet; then
-            echo "No changes detected"
-            echo "changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected"
-            echo "changes=true" >> $GITHUB_OUTPUT
-          fi
+          # 获取 bestproxy 数据并仅提取 IP，写入 cmliu/proxy.txt
+          echo "Fetching bestproxy data..."
+          curl -s "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" | jq -r '.[] | .ip' > cmliu/proxy.txt
+          
+          # 获取其他 IP 数据并仅提取 IP，写入 cmliu/ipv4.txt
+          echo "Fetching other IP data..."
+          {
+            curl -s "https://addressesapi.090227.xyz/ip.164746.xyz" | jq -r '.[] | .ip'
+            curl -s "https://addressesapi.090227.xyz/CloudFlareYes" | jq -r '.[] | .ip'
+            curl -s "https://ipdb.api.030101.xyz/?type=bestcf&country=true" | jq -r '.[] | .ip'
+          } > cmliu/ipv4.txt
 
       - name: Commit and push changes
-        if: steps.check_changes.outputs.changes == 'true'
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git commit -m "chore: update proxy IP lists $(date +'%Y-%m-%d')"
+          git add cmliu/proxy.txt cmliu/ipv4.txt
+          git commit -m "Update proxy and IP data $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push
