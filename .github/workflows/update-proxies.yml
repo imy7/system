@@ -11,18 +11,20 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}  # 使用默认GITHUB_TOKEN（适用于当前仓库）
 
     - name: Fetch and update proxy data
       run: |
-        # 创建目录（如果不存在）
+        # 确保cmliu目录存在（如果不存在则创建）
         mkdir -p cmliu
         
-        # 获取第一个API数据并写入proxy.txt
+        # 获取第一个API数据并写入proxy.txt（覆盖模式）
         echo "Fetching best proxy data..."
         curl -s "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" > cmliu/proxy.txt
         
-        # 获取其他API数据并合并到ipv4.txt
+        # 获取其他API数据并合并到ipv4.txt（先清空再追加）
         echo "Fetching IPv4 data..."
         > cmliu/ipv4.txt  # 清空文件
         
@@ -34,15 +36,13 @@ jobs:
           echo "Fetching from $url"
           curl -s "$url" >> cmliu/ipv4.txt
         done
-        
-        # 统一格式（如果API返回的数据不是ip#国家代码格式，这里需要处理）
-        # 这里假设API返回的数据已经是正确格式，如果不是，需要添加处理逻辑
-        # 例如：sed -i 's/\(.*\),\(.*\)/\1#\2/' cmliu/ipv4.txt
 
     - name: Commit and push changes
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add cmliu/proxy.txt cmliu/ipv4.txt
-        git commit -m "Update proxy and IPv4 data $(date +'%Y-%m-%d')" || echo "No changes to commit"
+        git commit -m "Update proxy and IPv4 data $(date +'%Y-%m-%d')" || exit 0
         git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 使用默认Token
