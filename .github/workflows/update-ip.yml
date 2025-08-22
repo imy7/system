@@ -14,8 +14,8 @@ jobs:
       uses: actions/checkout@v4
       with:
         # 使用 Personal Access Token
-        token: ${{ secrets.GITHUB_TOKEN }}
-
+        token: ${{ secrets.PAT }}
+      
     - name: Extract and process IPv4 addresses
       id: extract
       run: |
