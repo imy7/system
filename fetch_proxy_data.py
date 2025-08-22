@@ -4,7 +4,7 @@ import os
 def fetch_and_save_proxy_data():
     """从API获取代理数据并直接保存到文件"""
     api_url = "https://ipdb.api.030101.xyz/?type=bestproxy&country=true"
-    output_path = "/cmliu/proxyip.txt"
+    output_path = "cmliu/proxyip.txt"
     
     try:
         # 确保目录存在
