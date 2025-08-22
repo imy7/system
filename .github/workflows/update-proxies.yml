@@ -2,47 +2,45 @@ name: Update Proxy and IP Data
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天UTC时间0点运行（北京时间早上8点）
-  workflow_dispatch:    # 允许手动触发
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}  # 使用默认GITHUB_TOKEN（适用于当前仓库）
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-    - name: Fetch and update proxy data
-      run: |
-        # 确保cmliu目录存在（如果不存在则创建）
-        mkdir -p cmliu
-        
-        # 获取第一个API数据并写入proxy.txt（覆盖模式）
-        echo "Fetching best proxy data..."
-        curl -s "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" > cmliu/proxy.txt
-        
-        # 获取其他API数据并合并到ipv4.txt（先清空再追加）
-        echo "Fetching IPv4 data..."
-        > cmliu/ipv4.txt  # 清空文件
-        
-        # 逐个获取API数据并追加到文件
-        for url in \
-          "https://addressesapi.090227.xyz/ip.164746.xyz" \
-          "https://addressesapi.090227.xyz/CloudFlareYes" \
-          "https://ipdb.api.030101.xyz/?type=bestcf&country=true"; do
-          echo "Fetching from $url"
-          curl -s "$url" >> cmliu/ipv4.txt
-        done
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: imy7/system
+          ref: main
+          ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-    - name: Commit and push changes
-      run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git add cmliu/proxy.txt cmliu/ipv4.txt
-        git commit -m "Update proxy and IPv4 data $(date +'%Y-%m-%d')" || exit 0
-        git push
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 使用默认Token
+      - name: Fetch and update proxy data
+        run: |
+          mkdir -p cmliu
+          curl -s "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" > cmliu/proxy.txt
+          > cmliu/ipv4.txt
+          for url in \
+            "https://addressesapi.090227.xyz/ip.164746.xyz" \
+            "https://addressesapi.090227.xyz/CloudFlareYes" \
+            "https://ipdb.api.030101.xyz/?type=bestcf&country=true"; do
+            curl -s "$url" >> cmliu/ipv4.txt
+          done
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add cmliu/proxy.txt cmliu/ipv4.txt
+          git commit -m "Update proxy and IPv4 data $(date +'%Y-%m-%d')" || exit 0
+          git push
