@@ -19,52 +19,82 @@ jobs:
 
       - name: Fetch proxy data and write to files
         run: |
-          # 调试函数：打印 API 响应和错误
+          # 改进的调试函数
           debug_api() {
             local url="$1"
             echo "DEBUG: Fetching URL: $url"
             response=$(curl -s "$url")
-            echo "DEBUG: Raw response:"
-            echo "$response" | head -n 10  # 打印前10行避免日志过长
+            echo "DEBUG: Raw response (first 500 chars):"
+            echo "$response" | head -c 500
+            echo "DEBUG: HTTP status code:"
+            curl -s -o /dev/ -w "%{http_code}" "$url"
             echo "DEBUG: JSON validity check:"
-            echo "$response" | jq empty 2>&1 || echo "Invalid JSON!"
+            echo "$response" | jq empty 2>&1 || echo "Invalid JSON detected"
           }
 
-          # 提取 IP 的函数（兼容不同 JSON 结构）
+          # 带重试的 curl
+          curl_with_retry() {
+            local url="$1"
+            local max_retries=3
+            local retry_delay=5
+            for i in $(seq 1 $max_retries); do
+              response=$(curl -s "$url")
+              if [ -n "$response" ] && echo "$response" | jq -e . >/dev/ 2>&1; then
+                echo "$response"
+                return 0
+              fi
+              echo "Attempt $i failed, retrying in $retry_delay seconds..."
+              sleep $retry_delay
+            done
+            echo "Failed to fetch valid data from $url after $max_retries attempts" >&2
+            return 1
+          }
+
+          # 改进的 IP 提取函数
           extract_ips() {
             local url="$1"
             debug_api "$url"
-            curl -s "$url" | jq -r '
+            
+            # 尝试用重试机制获取数据
+            response=$(curl_with_retry "$url") || return 1
+            
+            # 处理多种 JSON 结构
+            echo "$response" | jq -r '
               try (
-                # 情况1: 直接是 IP 数组 ["1.1.1.1", "2.2.2.2"]
-                if type == "array" then .[]
-                # 情况2: 对象数组 [{ "ip": "1.1.1.1" }, ...]
-                elif type == "object" and has("ip") then .ip
-                # 情况3: 嵌套结构 { "data": [{ "ip": "..." }] }
-                elif has("data") then .data[].ip
+                if type == "array" then .[] | select(type == "string")
+                elif type == "object" then
+                  if has("ip") then .ip
+                  elif has("data") then .data[].ip
+                  else empty
+                  end
                 else empty
               end
               ) catch (
-                # 如果解析失败，尝试用 grep 提取 IP（兼容非 JSON 响应）
                 scan("[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+") | .[]
-              )'
+              )' 2>/dev/ || 
+            # 如果 jq 完全失败，改用 grep
+            echo "$response" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
           }
 
           # 获取 bestproxy 数据
           echo "Fetching bestproxy data..."
-          extract_ips "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" > cmliu/proxy.txt
+          extract_ips "https://ipdb.api.030101.xyz/?type=bestproxy&country=true" > cmliu/proxy.txt || {
+            echo "Failed to fetch bestproxy data"
+            exit 1
+          }
 
           # 获取其他 IP 数据
           echo "Fetching other IP data..."
           {
-            extract_ips "https://addressesapi.090227.xyz/ip.164746.xyz"
-            extract_ips "https://addressesapi.090227.xyz/CloudFlareYes"
-            extract_ips "https://ipdb.api.030101.xyz/?type=bestcf&country=true"
+            extract_ips "https://addressesapi.090227.xyz/ip.164746.xyz" || echo "Warning: Failed to fetch ip.164746.xyz"
+            extract_ips "https://addressesapi.090227.xyz/CloudFlareYes" || echo "Warning: Failed to fetch CloudFlareYes"
+            extract_ips "https://ipdb.api.030101.xyz/?type=bestcf&country=true" || echo "Warning: Failed to fetch bestcf"
           } > cmliu/ipv4.txt
 
           # 检查文件是否为空
           if [ ! -s cmliu/proxy.txt ]; then
-            echo "ERROR: proxy.txt is empty! API may have changed."
+            echo "ERROR: proxy.txt is empty! Last API response:"
+            cat cmliu/proxy.txt
             exit 1
           fi
 
